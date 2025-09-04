@@ -13,29 +13,28 @@ RUN CODE SNIPPETS AT YOUR OWN RISK, but feel free to pick the bones off this thi
 
 # The conversation
 
+
+
 I dont know much about database triggers, but could you read this document and give me some ideas how such a trigger might be introduced:
 
 https://github.com/richardforth/kanban/blob/main/database_driven_kanban_ideas.md
+
+
 ChatGPT said:
 Thought for 19s
 
 I couldn’t load that GitHub page just now (looks like a rendering hiccup on GitHub’s side). If you can paste the text here I’ll tailor this exactly to what’s in your doc. In the meantime, here’s a concrete, battle-tested way to introduce database triggers into a Kanban-style app—plus ready-to-drop snippets for Postgres and MySQL/MariaDB.
 
-Where triggers shine in a Kanban app
+## Where triggers shine in a Kanban app
 
-Automatic timestamps & who-did-what
+ - Automatic timestamps & who-did-what
+ - Ensure created_at, updated_at, created_by, updated_by are always set—no app-side gaps.
+ - Write to an activity_log table on key changes (status, assignee, priority, due date).
+ - Enforce valid status transitions (workflow guardrails)
+ - Only allow transitions in your workflow graph (e.g., todo → doing → review → done).
+ - Block illegal jumps (e.g., todo → done) unless a privileged user triggers a “fast-track.”
 
-Ensure created_at, updated_at, created_by, updated_by are always set—no app-side gaps.
-
-Write to an activity_log table on key changes (status, assignee, priority, due date).
-
-Enforce valid status transitions (workflow guardrails)
-
-Only allow transitions in your workflow graph (e.g., todo → doing → review → done).
-
-Block illegal jumps (e.g., todo → done) unless a privileged user triggers a “fast-track.”
-
-WIP limits per column or assignee
+### WIP limits per column or assignee
 
 Before moving a card into doing, count how many the user/team already has in that column; reject if exceeding the limit.
 
@@ -49,7 +48,7 @@ When a card moves to doing, set started_at.
 
 On update, if now() > due_at and status not in a “terminal” set, mark sla_breached = true and log it.
 
-Audit & compliance
+### Audit & compliance
 
 Immutable append-only card_history rows for every significant update—who, when, what changed (old/new values).
 
@@ -153,8 +152,9 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER cards_enforce_transition
 BEFORE UPDATE ON card
 FOR EACH ROW EXECUTE FUNCTION trg_cards_enforce_transition();
-
+```
 3) WIP limits & list counters
+```sql
 CREATE OR REPLACE FUNCTION trg_cards_wip_and_counters()
 RETURNS trigger AS $$
 DECLARE current_wip int;
@@ -184,6 +184,7 @@ AFTER INSERT OR UPDATE ON card
 FOR EACH ROW EXECUTE FUNCTION trg_cards_wip_and_counters();
 ```
 4) Activity history + NOTIFY
+```sql
 CREATE OR REPLACE FUNCTION trg_cards_history_notify()
 RETURNS trigger AS $$
 BEGIN
@@ -211,11 +212,13 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER cards_history_notify
 AFTER INSERT OR UPDATE ON card
 FOR EACH ROW EXECUTE FUNCTION trg_cards_history_notify();
+```
 
-MySQL / MariaDB equivalents (condensed)
+## MySQL / MariaDB equivalents (condensed)
 
 Note: No built-in NOTIFY/LISTEN. Use an outbox_events table and a worker.
 
+```sql
 DELIMITER //
 
 CREATE TRIGGER cards_set_timestamps_bi
@@ -289,8 +292,9 @@ BEGIN
 END//
 
 DELIMITER ;
+```
 
-Introduce triggers safely (playbook)
+## Introduce triggers safely (playbook)
 
 Start with read-only triggers (history, counters, outbox). They’re low-risk.
 
