@@ -72,6 +72,7 @@ Parent/child rollups
 If subtasks change status, recompute the parent’s aggregated status/progress fields.
 
 Suggested schema bits (simplified)
+```sql
 -- cards
 card(id PK, list_id FK, title, status, assignee_id, priority, due_at,
      created_at, created_by, updated_at, updated_by,
@@ -86,9 +87,11 @@ card_history(id PK, card_id FK, changed_at, changed_by,
 
 -- outbox (optional for notifications)
 outbox_events(id PK, topic, payload_json, created_at, processed_at null);
+```
 
 PostgreSQL trigger examples
 1) Set timestamps & basic activity log
+```sql
 CREATE OR REPLACE FUNCTION trg_cards_set_timestamps()
 RETURNS trigger AS $$
 BEGIN
@@ -105,8 +108,9 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER cards_set_timestamps
 BEFORE INSERT OR UPDATE ON card
 FOR EACH ROW EXECUTE FUNCTION trg_cards_set_timestamps();
-
+```
 2) Valid status transitions
+```sql
 -- Valid transitions table
 CREATE TABLE status_transition (
   from_status text, to_status text, PRIMARY KEY (from_status, to_status)
@@ -178,7 +182,7 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER cards_wip_and_counters
 AFTER INSERT OR UPDATE ON card
 FOR EACH ROW EXECUTE FUNCTION trg_cards_wip_and_counters();
-
+```
 4) Activity history + NOTIFY
 CREATE OR REPLACE FUNCTION trg_cards_history_notify()
 RETURNS trigger AS $$
