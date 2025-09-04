@@ -2,11 +2,11 @@
 
 Please note that all I have done here is tried to format the output with some markdown to aid readability. 
 
-Most of this is Chat GPT Wiffle using my previous doc as in input prompt. The big caveat here is that I have
-not tested any of this code, it is a high-level CONCEPTUAL conversation, thought ChatGPT did get a bit too
-enthusiatic and started digging into the weeds a bit and producing code, I would strongly advice (either
-future-me or you dear reader) to apply a health dose af skepticism over some of this code, but I do hope
-as its the desire of this repo, that you are able to pull out some ideas when implementing a software
+Most of this is Chat GPT wiffle using my previous doc as in input prompt. The big caveat here is that I have
+not tested any of this code, it is a high-level CONCEPTUAL conversation, though ChatGPT did get a bit too
+enthusiatic and started digging into the weeds a bit and producing code, I would strongly advise (either
+future-me or you, dear reader) to apply a healthy dose af skepticism over some of this code, but I do hope
+as is the desire of this repo, that you are able to pull out some ideas when implementing a software
 based kanban system.
 
 RUN CODE SNIPPETS AT YOUR OWN RISK, but feel free to pick the bones off this thing, I know I will be.
