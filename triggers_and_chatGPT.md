@@ -52,25 +52,25 @@ On update, if now() > due_at and status not in a “terminal” set, mark sla_br
 
 Immutable append-only card_history rows for every significant update—who, when, what changed (old/new values).
 
-Notifications
+## Notifications
 
 Postgres: use NOTIFY/LISTEN so your worker picks up “card_moved” events instantly.
 
 MySQL/MariaDB: insert into an outbox_events table for a background dispatcher.
 
-Ordering integrity
+## Ordering integrity
 
 Keep position contiguous within a list (no duplicates or gaps) when cards are moved or deleted.
 
-Soft-delete & cascade cleanup
+## Soft-delete & cascade cleanup
 
 If you soft-delete a card, also soft-delete its checklists/comments/attachments; restore on undelete.
 
-Parent/child rollups
+## Parent/child rollups
 
 If subtasks change status, recompute the parent’s aggregated status/progress fields.
 
-Suggested schema bits (simplified)
+# Suggested schema bits (simplified)
 ```sql
 -- cards
 card(id PK, list_id FK, title, status, assignee_id, priority, due_at,
@@ -88,8 +88,8 @@ card_history(id PK, card_id FK, changed_at, changed_by,
 outbox_events(id PK, topic, payload_json, created_at, processed_at null);
 ```
 
-PostgreSQL trigger examples
-1) Set timestamps & basic activity log
+# PostgreSQL trigger examples
+## 1) Set timestamps & basic activity log
 ```sql
 CREATE OR REPLACE FUNCTION trg_cards_set_timestamps()
 RETURNS trigger AS $$
@@ -108,7 +108,7 @@ CREATE TRIGGER cards_set_timestamps
 BEFORE INSERT OR UPDATE ON card
 FOR EACH ROW EXECUTE FUNCTION trg_cards_set_timestamps();
 ```
-2) Valid status transitions
+## 2) Valid status transitions
 ```sql
 -- Valid transitions table
 CREATE TABLE status_transition (
@@ -153,7 +153,7 @@ CREATE TRIGGER cards_enforce_transition
 BEFORE UPDATE ON card
 FOR EACH ROW EXECUTE FUNCTION trg_cards_enforce_transition();
 ```
-3) WIP limits & list counters
+## 3) WIP limits & list counters
 ```sql
 CREATE OR REPLACE FUNCTION trg_cards_wip_and_counters()
 RETURNS trigger AS $$
@@ -183,7 +183,7 @@ CREATE TRIGGER cards_wip_and_counters
 AFTER INSERT OR UPDATE ON card
 FOR EACH ROW EXECUTE FUNCTION trg_cards_wip_and_counters();
 ```
-4) Activity history + NOTIFY
+## 4) Activity history + NOTIFY
 ```sql
 CREATE OR REPLACE FUNCTION trg_cards_history_notify()
 RETURNS trigger AS $$
@@ -214,7 +214,7 @@ AFTER INSERT OR UPDATE ON card
 FOR EACH ROW EXECUTE FUNCTION trg_cards_history_notify();
 ```
 
-## MySQL / MariaDB equivalents (condensed)
+# MySQL / MariaDB equivalents (condensed)
 
 Note: No built-in NOTIFY/LISTEN. Use an outbox_events table and a worker.
 
@@ -294,21 +294,16 @@ END//
 DELIMITER ;
 ```
 
-## Introduce triggers safely (playbook)
+# Introduce triggers safely (playbook)
 
-Start with read-only triggers (history, counters, outbox). They’re low-risk.
+ - Start with read-only triggers (history, counters, outbox). They’re low-risk.
+ - Gatekeepers later (status transitions, WIP) once you’re confident you won’t block legitimate flows.
+ - Feature-flag via tables, not code: e.g., a settings table with booleans like enforce_wip_limits.
+ - Test with fixtures: simulate common scenarios—moving cards, bulk imports, reordering within/ across lists, soft-deletes, and rollbacks.
+ - Idempotent workers (for outbox): ensure retries don’t duplicate notifications.
+ - Document side-effects so app developers know what the DB will do for them.
 
-Gatekeepers later (status transitions, WIP) once you’re confident you won’t block legitimate flows.
-
-Feature-flag via tables, not code: e.g., a settings table with booleans like enforce_wip_limits.
-
-Test with fixtures: simulate common scenarios—moving cards, bulk imports, reordering within/ across lists, soft-deletes, and rollbacks.
-
-Idempotent workers (for outbox): ensure retries don’t duplicate notifications.
-
-Document side-effects so app developers know what the DB will do for them.
-
-When to avoid triggers
+## When to avoid triggers
 
 Heavy business logic that changes often → consider app or stored procedures.
 
@@ -406,9 +401,9 @@ throughout the value stream:
 Such a database might be able to be mormalised in a way that allows a table determining
 which queue a work item is in, rather than moving rows between tables, eg
 
-
+```
 id, reference, queue_name
-
+```
 
 Where reference is a foreign key that links to a larger table just called work_items
 which contains the 7 columns I mentioned above. When a work item is moved from one queue
@@ -506,7 +501,7 @@ Thought for 13s
 
 Awesome—thanks for the write-up. You’re already 90% of the way there. Below is a compact, database-first way to add triggers that do exactly what you described: enforce/observe WIP, emit “free slot” notifications, keep an audit trail, and prune stale backlog items. I’ll show Postgres first (best ergonomics) and then note MySQL tweaks.
 
-Minimal schema to support your ideas
+# Minimal schema to support your ideas
 
 ```
 -- WIP limits (-1 means unlimited)
@@ -563,7 +558,7 @@ CREATE TABLE outbox_events (
 );
 ```
 
-Seed your limits:
+# Seed your limits:
 
 ```
 INSERT INTO wip_limits(queue_name, wip_limit) VALUES
@@ -572,9 +567,11 @@ INSERT INTO wip_limits(queue_name, wip_limit) VALUES
 INSERT INTO queue_state(queue_name, current_wip)
 SELECT queue_name, 0 FROM wip_limits
 ON CONFLICT (queue_name) DO NOTHING;
+```
 
-Triggers that make it work (PostgreSQL)
-1) Enforce WIP on move + keep counters correct
+# Triggers that make it work (PostgreSQL)
+## 1) Enforce WIP on move + keep counters correct
+```sql
 CREATE OR REPLACE FUNCTION trg_queues_enforce_wip_and_count()
 RETURNS trigger AS $$
 DECLARE
@@ -651,11 +648,11 @@ FOR EACH ROW EXECUTE FUNCTION trg_queues_enforce_wip_and_count();
 
 Why BEFORE? So an over-limit move fails atomically, and counters never drift.
 
-2) Emit a “free slot” event when capacity appears
+## 2) Emit a “free slot” event when capacity appears
 
 We want to notify when a queue drops below its limit (after a delete or a move out). That happens when current_wip becomes < wip_limit. We capture that moment.
 
-```
+```sql
 CREATE OR REPLACE FUNCTION trg_queue_state_slot_available()
 RETURNS trigger AS $$
 DECLARE
@@ -691,7 +688,7 @@ FOR EACH ROW EXECUTE FUNCTION trg_queue_state_slot_available();
 
 This gives you your “email the PM when a free slot appears” hook via an outbox (recommended) or LISTEN/NOTIFY. Your worker sends the actual email.
 
-3) Audit log on every move
+## 3) Audit log on every move
 ```
 CREATE OR REPLACE FUNCTION trg_queues_audit()
 RETURNS trigger AS $$
@@ -717,7 +714,7 @@ FOR EACH ROW EXECUTE FUNCTION trg_queues_audit();
 
 Now you’ve got the immutable journey you showed in your example.
 
-4) Backlog auto-drop after 90 days (pruning)
+## 4) Backlog auto-drop after 90 days (pruning)
 
 A pure trigger can’t run on a timer. Use a tiny scheduled job that turns findings into data changes, which then flow through the same audit/outbox triggers.
 
@@ -749,32 +746,26 @@ SELECT cron.schedule('kanban-prune-backlog', '0 2 * * *', $$CALL prune_stale_bac
 
 If you can’t use pg_cron, run CALL prune_stale_backlog(); from any external scheduler (systemd/CRON/GitHub Actions)—same effect.
 
-How this answers each of your sections
+# How this answers each of your sections
 
-WIP limits table: you’ve got wip_limits with -1 = unlimited.
+ - WIP limits table: you’ve got wip_limits with -1 = unlimited.
+ - Main queues table: you’ve got queues(reference, queue_name, moved_at). You never move rows between stage tables; you just change queue_name.
 
-Main queues table: you’ve got queues(reference, queue_name, moved_at). You never move rows between stage tables; you just change queue_name.
+# Triggers:
+ - Enforce limit on insert/move.
+ - Maintain `queue_state.current_wip` accurately (no racing `COUNT(*)`).
+ - Notify on capacity appearance via `outbox_events` (your mailer reads & emails the PM).
 
-Triggers:
-
-Enforce limit on insert/move.
-
-Maintain `queue_state.current_wip` accurately (no racing `COUNT(*)`).
-
-Notify on capacity appearance via `outbox_events` (your mailer reads & emails the PM).
-
-Audit every move.
-
-Backlog timeout: handled via a tiny scheduled procedure that reuses the same triggers (so audits and notifications still happen).
-
-SLA/past due: an example computed column shows how to flag, and you can add similar rules in move triggers if you want to log SLA breaches.
-
-Quick MySQL / MariaDB notes
+#Audit every move.
+ - Backlog timeout: handled via a tiny scheduled procedure that reuses the same triggers (so audits and notifications still happen).
+ - SLA/past due: an example computed column shows how to flag, and you can add similar rules in move triggers if you want to log SLA breaches.
+ 
+# Quick MySQL / MariaDB notes
 
 Replace PL/pgSQL with plain SQL triggers. No LISTEN/NOTIFY, so rely on `outbox_events` + a worker.
 
 For a scheduler, use MySQL Event Scheduler:
-```
+```sql
 CREATE EVENT prune_stale_backlog
 ON SCHEDULE EVERY 1 DAY STARTS CURRENT_DATE + INTERVAL 2 HOUR
 DO
@@ -787,19 +778,14 @@ DO
 
 MySQL lacks GENERATED ALWAYS AS (...) STORED with now() in expressions—use a trigger to set `past_due` on write or compute it in views/queries.
 
-Rollout plan (safe & incremental)
+# Rollout plan (safe & incremental)
 
-Create wip_limits, queue_state, and audit_log.
-
-Add audit trigger (read-only, low risk).
-
-Add counters trigger (no enforcement yet).
-
-Flip on enforcement (reject over-limit moves).
-
-Add slot-available trigger → connect a tiny worker that emails PMs (reads outbox_events).
-
-Add the 90-day prune job (backlog hygiene).
+ - Create wip_limits, queue_state, and audit_log.
+ - Add audit trigger (read-only, low risk).
+ - Add counters trigger (no enforcement yet).
+ - Flip on enforcement (reject over-limit moves).
+ - Add slot-available trigger → connect a tiny worker that emails PMs (reads outbox_events).
+ - Add the 90-day prune job (backlog hygiene).
 
 If you’d like, paste your exact column names/types and DB (Postgres vs MySQL), and I’ll tailor the DDL/triggers line-for-line so you can run them as-is.
 
@@ -817,17 +803,15 @@ Exactly 👍 — by “worker” I mean a background process (could be a service
 
 Think of it as a bridge between the database world and the outside world (email, Slack, Teams, SMS, Jira updates, etc). Triggers are excellent at keeping database state correct, but they shouldn’t directly send emails/webhooks for a few reasons:
 
-Portability: your DB doesn’t know how to talk SMTP/HTTP.
+ - Portability: your DB doesn’t know how to talk SMTP/HTTP.
+ - Stability: you don’t want an email server hiccup to block an INSERT into queues.
+ - Retries: a worker can retry failed sends, back off, or mark errors for investigation.
 
-Stability: you don’t want an email server hiccup to block an INSERT into queues.
-
-Retries: a worker can retry failed sends, back off, or mark errors for investigation.
-
-How it works in practice
+# How it works in practice
 
 Trigger inserts into outbox_events
 
-```
+```sql
 INSERT INTO outbox_events(topic, payload)
 VALUES ('queue.slot_available',
         jsonb_build_object('queue','development','free_slots',1));
@@ -837,38 +821,36 @@ Worker polls or listens
 
 Polling: every few seconds, run
 
+```sql
 SELECT * FROM outbox_events WHERE processed_at IS NULL ORDER BY id LIMIT 10;
-
+```
 
 then process each event, send the email, and update processed_at.
 
 Listening: in Postgres, you can LISTEN kanban_events; and the trigger’s pg_notify() will wake the worker instantly.
 
-Worker sends emails
-
-Reads event payload (topic = 'queue.slot_available').
-
-Formats: “Development queue has 1 free slot available.”
-
-Uses SMTP or an email API (SendGrid, SES, Postmark, etc).
-
-Mark as processed
+ - Worker sends emails
+ - Reads event payload (topic = 'queue.slot_available').
+ - Formats: “Development queue has 1 free slot available.”
+ - Uses SMTP or an email API (SendGrid, SES, Postmark, etc).
+ - Mark as processed
 
 ```sql
 UPDATE outbox_events SET processed_at = now() WHERE id = $event_id;
 ```
-Worker technology options
 
-Simple cron + script:
+# Worker technology options
+
+## Simple cron + script:
 A Python/Node/Ruby/Go script runs every minute, checks for new events, sends emails.
 
-Long-running daemon:
+## Long-running daemon:
 A service that connects to the DB, does LISTEN/NOTIFY (Postgres) or polling loop, and reacts instantly.
 
-Job queues:
+## Job queues:
 Pipe DB events into a queue (RabbitMQ, Kafka, Sidekiq, Celery, etc) for horizontal scale and retries.
 
-Serverless:
+## Serverless:
 Cloud functions (AWS Lambda, GCP Cloud Function, etc) triggered by DB change stream or polling.
 
 👉 So in short:
@@ -883,17 +865,14 @@ Thought for 18s
 
 Totally—here’s a small, production-leaning Python worker that:
 
-polls your outbox_events table,
-
-safely claims events with FOR UPDATE SKIP LOCKED (so multiple workers won’t double-send),
-
-sends an email via SMTP,
-
-records success/failure with retry counts.
+ - polls your outbox_events table,
+ - safely claims events with FOR UPDATE SKIP LOCKED (so multiple workers won’t double-send),
+ - sends an email via SMTP,
+ - records success/failure with retry counts.
 
 It’s written for PostgreSQL (via psycopg v3), but I note a MySQL tweak at the end.
 
-1) Table hardening (recommended)
+# 1) Table hardening (recommended)
 ```sql
 -- Add a couple of ops-friendly columns
 ALTER TABLE outbox_events
@@ -906,7 +885,7 @@ CREATE INDEX IF NOT EXISTS outbox_events_unprocessed_idx
   WHERE processed_at IS NULL AND attempts < 10;
 
 ```
-2) Minimal worker (Python)
+# 2) Minimal worker (Python)
 
 Save as worker.py.
 
@@ -1088,7 +1067,7 @@ python worker.py
 
 Scale-out: you can run multiple worker processes—FOR UPDATE SKIP LOCKED prevents duplicate work.
 
-3) Hooking it to your trigger
+# 3) Hooking it to your trigger
 
 When you insert into outbox_events, include the recipient if you want:
 
@@ -1398,7 +1377,7 @@ smtp_use_tls = yes
 
 Then:
 
-```
+```bash
 echo "[smtp.yourdomain.tld]:587 USER:PASS" | sudo tee /etc/postfix/sasl_passwd
 sudo postmap /etc/postfix/sasl_passwd
 sudo systemctl restart postfix
@@ -1407,7 +1386,7 @@ sudo chmod 600 /etc/postfix/sasl_passwd /etc/postfix/sasl_passwd.db
 
 Test from the worker host:
 
-```
+```bash
 python - <<'PY'
 import smtplib
 from email.message import EmailMessage
@@ -1419,7 +1398,7 @@ PY
 
 /etc/systemd/system/kanban-outbox-worker.service:
 
-```
+```ini
 [Unit]
 Description=Kanban Outbox Worker
 After=network-online.target mysql.service postfix.service
@@ -1448,7 +1427,7 @@ WantedBy=multi-user.target
 
 Then:
 
-```
+```bash
 sudo mkdir -p /opt/kanban-worker
 sudo cp worker.py /opt/kanban-worker/
 python -m venv /opt/kanban-worker/.venv
