@@ -7,7 +7,10 @@ in-house kanban software.
 
 In a later chapter, one thing stood out and really clicked with me, that mentioned
 database triggers, that emailed the Project Manager when a free slot became available
-in an imput queue (remember WIP Limits).
+in an input queue, or buffer by implementing and comapring actual work in progress, 
+(WIP) with agreed WIP Limits.
+
+## First table idea 
 
 So that immediately got me thinking about first ideas for a database table design
 that had WIP limits defined for each input queue for example., suppse we have a
@@ -57,6 +60,9 @@ Liming WIP enables workstations to clean house, and find improvements which incr
 quality and flow, which perhaps for the first time in a long time they have had time
 to implement improvements and pay down technical debt.
 
+
+## Other tables, views etc 
+
 Within each table that represents a stage or workstation in the value stream, they should
 maintain the same columns which represent fields of a kanban card that might be found
 on a physical kanban card wallm ideas for this include, but not limited to (remember each
@@ -73,6 +79,8 @@ throughout the value stream:
 - Designated/Assigned Person (Named Engineer, Developer, Tester etc doing the work)
 - Dependency (linkage to other flow items?)
 ```
+
+## A main queues table that tracks work items through the value stream
 
 Such a database might be able to be mormalised in a way that allows a table determining
 which queue a work item is in, rather than moving rows between tables, eg
@@ -106,3 +114,73 @@ be possible to use the `wip_limits` table I discussed earlier to compare against
 in a given view for example (or count how mant items are in a given state within the`queues`
 table to say, OK, we have a WIP limit of 3, but only two items in develop, so lets send a
 notification that there is a free slot in the develop queue (3 - 2 = 1).
+
+## Audit Logs?
+
+Once a work item is complete, it makes no sence to keep it in the `queues` table, so one
+might be tempted to remove the work item, and its place in the `queues` table. Which this
+might seem like it solves the immediate problem of database growth, you'll lose all the rich
+history that may be useful to reporting.
+
+One solution might be to remove the entry from the `queues` table but leave it in `work_items`
+but marked as completed in the queue column, and then have an audit log that logs the date
+and state change of a work item, by reference, as it flows through teh work stream so that you
+can see the history and report on whether it met SLA or not, such an audit table might look
+like this (simplified idea at this stage):
+
+```
+
++-----+------------+-----------+------------+
+| id  | date       | reference | queue      |
++-----+------------+-----------+------------+
+| 1   | 2025-01-01 |     12345 | backlog    |
+...
+| 27  | 2025-01-14 |     12345 | triage     |
+...
+| 317 | 2025-01-29 |     12345 | develop    |
+...
+| 444 | 2025-02-08 |     12345 | test       |
+...
+| 527 | 2025-02-15 |     12345 | uat        |
+...
+| 635 | 2025-04-02 |     12345 | production |
+
+...
+
+It is debatable whether you want a production queue, or simply use completed, that may imply
+it has been delivered to production.
+
+Petrhaps a driver for having separate production and completed queues, is to allow passage of
+time to ensure that anything delevered to production with no defects reported within say 30 days
+automatically gets marked as completed.
+
+## Limiting WIP by imposing timeout limits of the backlog
+
+The idea is that in a kanban pull-system, items from the backlog are triaged and prioritised for
+work via prioritisation meetings that occur on a regular cadence, therefore, if an item hasnt been
+prioritised for actionable work wihtin a set period of time, one might argue that it is not
+important and therefore dropped form eth backlog. If this work becomes important in the future,
+it can re-enter the backlog for prioritization. such a work flow might be represented in the audit
+log as such:
+
+
+```
+
++-----+------------+-----------+------------+
+| id  | date       | reference | queue      |
++-----+------------+-----------+------------+
+...
+|   2 | 2025-01-01  |    12555 |    backlog | 
+...
+| 987 | 2025-04-01  |    12555 |       drop |
+```
+```
+
+Without understanding triggers too deeply, one can see how a database trigger could automate this.
+
+If a work item is dropped from the backlog after 90 days, it's creator can re-submit it at a later
+date. The idea is that stakeholders attend the prioritisation meetings and/or state their cases
+so that the business can make a decision on priorities based on urgency and need. Therefore one
+can see that if a work item hasnt met a threshold for urgency or need, wiothin 90 days, it should
+be pruned from the system.
+ 
