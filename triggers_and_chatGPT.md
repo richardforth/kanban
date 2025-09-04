@@ -38,15 +38,14 @@ I couldn’t load that GitHub page just now (looks like a rendering hiccup on Gi
 
 Before moving a card into doing, count how many the user/team already has in that column; reject if exceeding the limit.
 
-Denormalized counters kept consistent
+### Denormalized counters kept consistent
 
 Maintain lists.wip_count, boards.card_count, users.open_card_count without relying on the app layer to remember to update them.
 
-SLA / due-date escalation hooks
+###SLA / due-date escalation hooks
 
-When a card moves to doing, set started_at.
-
-On update, if now() > due_at and status not in a “terminal” set, mark sla_breached = true and log it.
+ - When a card moves to doing, set started_at.
+ - On update, if now() > due_at and status not in a “terminal” set, mark sla_breached = true and log it.
 
 ### Audit & compliance
 
